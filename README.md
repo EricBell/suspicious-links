@@ -78,6 +78,7 @@ Create `.bak` copies before modifying files:
 | `--no-recurse` | | `false` | Do not recurse into subdirectories |
 | `--include-hidden`| | `false` | Include hidden files and directories |
 | `--gfm` | | `false` | Include GitHub Flavored Markdown table delimiter row (`\| --- \| --- \|`) |
+| `--find` | | `false` | Read-only: list each file and each `Suspicious Link Removed` marker found (case-insensitive); modifies nothing |
 | `--verbose` | `-v` | `false` | Print detailed scanning diagnostics |
 | `--version` | `-V` | | Print the version number and exit |
 

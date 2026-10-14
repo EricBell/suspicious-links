@@ -1,6 +1,7 @@
 use crate::reporter::{write_report_to_dir, ReportEntry};
 use crate::sanitizer::{sanitize_file, SanitizeResult};
 use std::collections::BTreeMap;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -43,6 +44,99 @@ pub struct ScanSummary {
     pub reports_generated: Vec<PathBuf>,
 }
 
+/// Walks `config.root_path` and returns the files eligible for scanning:
+/// skips `.git`, hidden entries (unless requested), the report file and `.bak` files.
+fn collect_files(config: &ScannerConfig) -> Vec<PathBuf> {
+    let root = &config.root_path;
+    let mut walk = WalkDir::new(root);
+    if !config.recursive && root.is_dir() {
+        walk = walk.max_depth(1);
+    }
+
+    let report_lower = config.report_filename.to_lowercase();
+    let mut files = Vec::new();
+
+    for entry in walk.into_iter().filter_entry(|e| {
+        let file_name = e.file_name().to_string_lossy();
+        if file_name == ".git" {
+            return false;
+        }
+        if !config.include_hidden && file_name.starts_with('.') && e.depth() > 0 {
+            return false;
+        }
+        true
+    }) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                if config.verbose {
+                    eprintln!("Warning: skipping unreadable entry: {}", err);
+                }
+                continue;
+            }
+        };
+
+        if !entry.path().is_file() {
+            continue;
+        }
+
+        let file_name = entry.file_name().to_string_lossy();
+        // Skip any existing report file (case-insensitive) to prevent recursive self-modification
+        if file_name.to_lowercase() == report_lower || file_name.ends_with(".bak") {
+            continue;
+        }
+
+        files.push(entry.into_path());
+    }
+
+    files
+}
+
+/// A previously inserted marker found in a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundMarker {
+    pub path: PathBuf,
+    pub value: String,
+}
+
+/// Text searched for by `find_markers` (matched case-insensitively).
+pub const MARKER_TEXT: &str = "Suspicious Link Removed";
+
+/// Read-only scan for occurrences of `MARKER_TEXT`, in file and textual order.
+/// Binary and non-UTF-8 files are skipped; nothing is modified.
+pub fn find_markers(config: &ScannerConfig) -> io::Result<Vec<FoundMarker>> {
+    if !config.root_path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Path '{}' does not exist", config.root_path.display()),
+        ));
+    }
+
+    let needle = MARKER_TEXT.to_lowercase();
+    let mut found = Vec::new();
+
+    for path in collect_files(config) {
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => continue,
+            Err(e) => return Err(e),
+        };
+        if content.contains('\0') {
+            continue;
+        }
+        // ASCII lowercasing keeps byte offsets identical to the original text.
+        let lower = content.to_ascii_lowercase();
+        for (idx, _) in lower.match_indices(&needle) {
+            found.push(FoundMarker {
+                path: path.clone(),
+                value: content[idx..idx + needle.len()].to_string(),
+            });
+        }
+    }
+
+    Ok(found)
+}
+
 pub fn run_scanner(config: &ScannerConfig) -> io::Result<ScanSummary> {
     let mut summary = ScanSummary::default();
     let mut dir_entries_map: BTreeMap<PathBuf, Vec<ReportEntry>> = BTreeMap::new();
@@ -55,54 +149,12 @@ pub fn run_scanner(config: &ScannerConfig) -> io::Result<ScanSummary> {
         ));
     }
 
-    let mut walk = WalkDir::new(root);
-    if !config.recursive && root.is_dir() {
-        walk = walk.max_depth(1);
-    }
-
-    let report_lower = config.report_filename.to_lowercase();
-
-    for entry in walk
-        .into_iter()
-        .filter_entry(|e| {
-            let file_name = e.file_name().to_string_lossy();
-            // Skip .git directories
-            if file_name == ".git" {
-                return false;
-            }
-            // Skip hidden files/directories unless explicitly requested
-            if !config.include_hidden && file_name.starts_with('.') && e.depth() > 0 {
-                return false;
-            }
-            true
-        })
-    {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(err) => {
-                if config.verbose {
-                    eprintln!("Warning: skipping unreadable entry: {}", err);
-                }
-                continue;
-            }
-        };
-
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let file_name = entry.file_name().to_string_lossy();
-
-        // Skip any existing report file (case-insensitive) to prevent recursive self-modification
-        if file_name.to_lowercase() == report_lower {
-            continue;
-        }
-
-        // Skip backup files
-        if file_name.ends_with(".bak") {
-            continue;
-        }
+    for path in collect_files(config) {
+        let path = path.as_path();
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
         summary.files_scanned += 1;
         if config.verbose {

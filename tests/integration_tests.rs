@@ -217,3 +217,31 @@ fn test_cli_version_flag() {
         assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
     }
 }
+
+#[test]
+fn test_cli_find_reports_markers_without_modifying() {
+    let root = tempdir().unwrap();
+    let with = root.path().join("a.txt");
+    let clean = root.path().join("b.txt");
+    let original = "x [Suspicious Link Removed] y [suspicious link removed]";
+    fs::write(&with, original).unwrap();
+    fs::write(&clean, "nothing here").unwrap();
+
+    let out = Command::new(get_bin_path())
+        .arg(root.path())
+        .arg("--find")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let a = with.display().to_string();
+    assert!(stdout.contains(&format!("{}: Suspicious Link Removed", a)));
+    assert!(stdout.contains(&format!("{}: suspicious link removed", a)));
+    assert!(!stdout.contains("b.txt"));
+    assert!(stdout.contains("Found 2 marker(s)"));
+
+    // Read-only: no changes, no report
+    assert_eq!(fs::read_to_string(&with).unwrap(), original);
+    assert!(!root.path().join("suspicious-links.md").exists());
+}

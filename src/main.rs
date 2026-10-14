@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 use std::process;
-use suspicious_links::scanner::{run_scanner, ScannerConfig};
+use suspicious_links::scanner::{find_markers, run_scanner, ScannerConfig};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -43,6 +43,10 @@ struct Args {
     #[arg(long)]
     gfm: bool,
 
+    /// Only report files containing "Suspicious Link Removed" markers; modifies nothing
+    #[arg(long)]
+    find: bool,
+
     /// Print detailed progress information
     #[arg(short = 'v', long)]
     verbose: bool,
@@ -62,6 +66,22 @@ fn main() {
         include_hidden: args.include_hidden,
         verbose: args.verbose,
     };
+
+    if args.find {
+        match find_markers(&config) {
+            Ok(found) => {
+                for m in &found {
+                    println!("{}: {}", m.path.display(), m.value);
+                }
+                println!("Found {} marker(s)", found.len());
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                process::exit(1);
+            }
+        }
+        return;
+    }
 
     if config.dry_run {
         println!("Running in DRY-RUN mode. No files will be modified.");
