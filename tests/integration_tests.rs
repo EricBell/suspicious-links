@@ -206,3 +206,14 @@ fn test_cli_idempotent_rerun() {
         report_content
     );
 }
+
+#[test]
+fn test_cli_version_flag() {
+    let expected = format!("suspicious-links {}\n", env!("CARGO_PKG_VERSION"));
+
+    for flag in ["--version", "-V"] {
+        let out = Command::new(get_bin_path()).arg(flag).output().unwrap();
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+    }
+}
