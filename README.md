@@ -79,6 +79,7 @@ Create `.bak` copies before modifying files:
 | `--include-hidden`| | `false` | Include hidden files and directories |
 | `--gfm` | | `false` | Include GitHub Flavored Markdown table delimiter row (`\| --- \| --- \|`) |
 | `--verbose` | `-v` | `false` | Print detailed scanning diagnostics |
+| `--version` | `-V` | | Print the version number and exit |
 
 ---
 
